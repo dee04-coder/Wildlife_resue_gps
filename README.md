@@ -22,6 +22,8 @@ re-plans when trails are closed or become more dangerous.
 - **Live trail updates:** close a trail or change its risk; the next plan reflects it
 - **Mission log** of every plan with time, risk and cost totals
 - **SQLite storage** with constraints (valid risk range, no duplicate trails, foreign keys)
+- **Map coordinates** on every node, so a front end can draw the reserve
+- **Versioned schema migrations** (`PRAGMA user_version`): older databases upgrade automatically on start-up
 - **Protected admin endpoint** (API key, constant-time comparison; disabled unless configured)
 - Two demo reserves seeded on first run
 
@@ -38,6 +40,7 @@ export RANGER_ADMIN_KEY=change-me  # enables PATCH /trails (Windows: set RANGER_
 uvicorn app.main:app --reload
 ```
 
+App: http://127.0.0.1:8000/ (redirects to the map)
 Interactive docs: http://127.0.0.1:8000/docs
 
 ## Try it
@@ -78,9 +81,43 @@ curl -X PATCH http://127.0.0.1:8000/reserves/small-reserve/trails/5 \
 | POST | `/reserves/{id}/missions` | Plan and log a multi-stop mission |
 | GET | `/reserves/{id}/missions` | Mission history |
 | PATCH | `/reserves/{id}/trails/{trail_id}` | Change risk / open-closed status (needs `X-API-Key`) |
+| PATCH | `/reserves/{id}/nodes/{name}` | Move a node on the map: `{"x": 10, "y": 60}` (needs `X-API-Key`) |
 
 Status codes: `404` unknown reserve or trail, `422` invalid input or unknown node,
 `409` no open route, `401` bad API key, `503` admin endpoints not configured.
+
+## Map coordinates
+
+Every node has `x` and `y` on a **0-100 grid**. The origin is the top-left corner and `y`
+grows downward, the same convention as SVG and canvas, so a front end can draw a node at
+`(x, y)` directly, for example inside `viewBox="0 0 100 100"`. The demo positions are traced
+from the challenge diagrams. `GET /reserves/{id}/graph` returns them with the nodes.
+
+## Database migrations
+
+The original tables are the version-0 schema. Later changes are numbered functions in
+`app/db.py` (`MIGRATIONS`). On start-up the app reads `PRAGMA user_version` and runs any
+migration newer than the database, inside a transaction, then records the new version.
+Migration 1 added the `x`/`y` columns and filled in the demo reserves, so an existing
+`ranger.db` upgrades in place without losing data or needing to be deleted.
+
+## Front end
+
+`app.mount("/map", ...)` in `api.py` serves `frontend/` as static files, so the whole app
+is one server on one port. Plain HTML/CSS/JS, no build step, no framework.
+
+- **Map:** an SVG drawn from `GET /reserves/{id}/graph`, using each node's `x`/`y`.
+  Trails are coloured by risk (green to red) and dashed when closed. Click a trail to
+  open the admin panel and change its risk or open/closed status.
+- **Mission planner:** tick stations, pick fastest / balanced / safest, and the app calls
+  `POST /reserves/{id}/missions` and draws the returned route as an animated line, with
+  numbered badges at each station in visiting order.
+- **Mission log:** reads `GET /reserves/{id}/missions` and lets you click an old plan to
+  redraw it.
+- **Security:** the admin API key is only ever held in the page's memory (a password
+  field), sent as `X-API-Key`, and never stored; all API text is inserted as text, never
+  as HTML, so a malicious trail note cannot inject markup; the server sends a strict
+  Content-Security-Policy on `/map/*`.
 
 ## Project layout
 
@@ -90,9 +127,10 @@ app/
   db.py          SQLite schema, seeding, queries
   seed_data.py   Demo reserves
   schemas.py     Request/response models
-  api.py         FastAPI app factory
+  api.py         FastAPI app factory, also serves frontend/ at /map
   main.py        uvicorn entry point
-tests/           unit tests for routing and database, plus API tests
+frontend/        static HTML/CSS/JS map and mission planner
+tests/           unit tests for routing, database and API (incl. the front end route)
 ```
 
 ## Tests

@@ -1,0 +1,4 @@
+{
+    "appService.defaultWebAppToDeploy": "/subscriptions/c24a60be-027d-418e-adbe-9d3287de342f/resourceGroups/appsvc_linux_southafricanorth/providers/Microsoft.Web/sites/reserve-rescue",
+    "appService.deploySubpath": "."
+}
